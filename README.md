@@ -14,7 +14,7 @@ Tools to list, extract, repack, and decompile the `*.pak` format, tested on `神
   ```bash
   python script/decompiler.py --decode --encoding shift_jis --jar script/unluac.jar extracted/script decompiled
   ```
-- Repack (not byte-identical; suitable for修改后重新打包):
+- Repack (not byte-identical):
   ```bash
   python compress.py index.json extracted -o game_new.pak
   ```
