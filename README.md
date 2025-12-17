@@ -32,7 +32,7 @@ For all commands below, replace `python` with `.\.venv32\Scripts\python.exe` to 
   ```bash
   .\.venv32\Scripts\python.exe compress.py index.json extracted -o game_new.pak
   ```
-- Compile Lua 5.1 (uses `script/lua5.1.dll`, default encoding shift_jis):
+- Compile Lua 5.1 (uses `script/lua5.1.dll`, default encoding shift_jis; run with 32-bit Python from repo root so the DLL is found; decompiled Lua may miss `end` etc., fix the .lua if compile fails):
   - Single:
     ```bash
     .\.venv32\Scripts\python.exe script/compiler.py decompiled\example.lua -o recompiled\example.scb

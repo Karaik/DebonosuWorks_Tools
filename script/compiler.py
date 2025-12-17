@@ -18,7 +18,7 @@ def load_lua_dll():
     return ctypes.WinDLL(str(dll_path))
 
 
-def compile_lua(lua_src: str, chunk_name: str = "chunk", encoding: str = "utf-8") -> bytes:
+def compile_lua(lua_src, chunk_name: str = "chunk", encoding: str = "utf-8") -> bytes:
     lua = load_lua_dll()
 
     lua.luaL_newstate.restype = ctypes.c_void_p
@@ -36,7 +36,11 @@ def compile_lua(lua_src: str, chunk_name: str = "chunk", encoding: str = "utf-8"
         raise RuntimeError("failed to create Lua state")
     lua.luaL_openlibs(L)
 
-    src_bytes = lua_src.encode(encoding)
+    # 接受 bytes 或 str，避免编码错误导致无法编译
+    if isinstance(lua_src, bytes):
+        src_bytes = lua_src
+    else:
+        src_bytes = str(lua_src).encode(encoding, errors="surrogateescape")
     status = lua.luaL_loadbuffer(L, ctypes.c_char_p(src_bytes), ctypes.c_size_t(len(src_bytes)), ctypes.c_char_p(chunk_name.encode("utf-8")))
     if status != 0:
         sz = ctypes.c_size_t(0)
@@ -72,9 +76,9 @@ def main():
         raise SystemExit("Please run under 32-bit Python (e.g., .\\.venv32\\Scripts\\python.exe).")
 
     if args.input.is_file():
-        src_text = args.input.read_text(encoding=args.encoding)
+        src_bytes = args.input.read_bytes()
         out_path = args.out if args.out else args.input.with_suffix(".scb")
-        bytecode = compile_lua(src_text, chunk_name=str(args.input.name), encoding=args.encoding)
+        bytecode = compile_lua(src_bytes, chunk_name=str(args.input.name), encoding=args.encoding)
         out_path.write_bytes(bytecode)
         print(f"Compiled {args.input} -> {out_path} ({len(bytecode)} bytes)")
         return
@@ -90,8 +94,8 @@ def main():
         dst = (out_dir / rel).with_suffix(".scb")
         dst.parent.mkdir(parents=True, exist_ok=True)
         try:
-            src_text = lua_path.read_text(encoding=args.encoding)
-            bytecode = compile_lua(src_text, chunk_name=str(rel), encoding=args.encoding)
+            src_bytes = lua_path.read_bytes()
+            bytecode = compile_lua(src_bytes, chunk_name=str(rel), encoding=args.encoding)
         except Exception as exc:  # 反编译结果异常也继续处理其他文件
             failures.append((rel, str(exc)))
             print(f"[FAIL] {rel}: {exc}")
