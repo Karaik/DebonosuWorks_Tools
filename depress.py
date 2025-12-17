@@ -3,6 +3,7 @@
 depress.py
 
 解包工具：按照逆向得到的格式解析 PAK 头、索引（原始 DEFLATE）与文件数据。
+索引条目布局：offset(int64) + usize(int64) + csize(int64) + flags(uint32) + time(24 bytes) + Shift-JIS name\0
 """
 import argparse
 import json
@@ -19,7 +20,7 @@ class PakError(Exception):
 def read_header(pak_bytes: bytes):
     """
     读取并验证 PAK 头。
-    - 偏移 0: "PAK\\0"
+    - 偏移 0: "PAK\0"
     - 偏移 4: 扩展头偏移（在原程序里按 1 字节读，这里仍取 32 位方便处理）
     - 扩展头 24 字节: index 相对偏移、根节点数量、索引原始/压缩大小等。
     """
@@ -62,9 +63,8 @@ def read_header(pak_bytes: bytes):
 def parse_entries(index_data: bytes, start: int, count: int, prefix: pathlib.Path):
     """
     递归解析索引。
-    - 每个条目：13 个 uint32（52 字节）+ 以 \\0 结尾的 Shift-JIS 文件/目录名
-    - attrs & 0x10 表示目录，field[2] 存放子项数量；否则为文件，field[0] 是数据区内偏移，
-      field[2]/field[4] 分别为解压/压缩尺寸。
+    - 每个条目：offset(int64) + usize(int64) + csize(int64) + flags(uint32) + time(24 bytes) + Shift-JIS 名字\0
+    - flags & 0x10 表示目录，usize 存放子项数量；否则为文件，offset/usize/csize 为文件参数。
     """
     pos = start
     entries = []
@@ -73,7 +73,7 @@ def parse_entries(index_data: bytes, start: int, count: int, prefix: pathlib.Pat
         if pos + 52 > len(index_data):
             raise PakError("索引数据不足，读条目头失败")
 
-        fields = struct.unpack_from("<13I", index_data, pos)
+        offset, usize, csize, flags, time_bytes = struct.unpack_from("<QQQI24s", index_data, pos)
         name_end = index_data.find(b"\x00", pos + 52)
         if name_end == -1:
             raise PakError("文件名未找到结尾的 0 字节")
@@ -81,18 +81,15 @@ def parse_entries(index_data: bytes, start: int, count: int, prefix: pathlib.Pat
         name = index_data[pos + 52 : name_end].decode("shift_jis", errors="replace")
         pos = name_end + 1
 
-        attrs = fields[6]
+        attrs = flags
         path = prefix / name if prefix != pathlib.Path() else pathlib.Path(name)
 
         if attrs & 0x10:  # 目录
-            child_count = fields[2]
-            entries.append({"type": "dir", "path": path, "child_count": child_count, "attributes": attrs})
+            child_count = usize
+            entries.append({"type": "dir", "path": path, "child_count": child_count, "attributes": attrs, "time_bytes": time_bytes})
             pos, child_entries = parse_entries(index_data, pos, child_count, path)
             entries.extend(child_entries)
         else:  # 文件
-            offset = fields[0]
-            usize = fields[2]
-            csize = fields[4]
             entries.append(
                 {
                     "type": "file",
@@ -101,6 +98,7 @@ def parse_entries(index_data: bytes, start: int, count: int, prefix: pathlib.Pat
                     "compressed_size": csize,
                     "uncompressed_size": usize,
                     "attributes": attrs,
+                    "time_bytes": time_bytes,
                 }
             )
 
@@ -133,6 +131,17 @@ def extract_file(pak_bytes: bytes, entry, base_offset: int, out_dir: pathlib.Pat
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(payload)
 
+
+def serialize_entries(entries):
+    """将 Path 和 bytes 转为可 JSON 序列化。"""
+    out = []
+    for e in entries:
+        item = {**e, "path": str(e["path"])}
+        if "time_bytes" in item:
+            item["time_hex"] = item["time_bytes"].hex()
+            del item["time_bytes"]
+        out.append(item)
+    return out
 
 def main():
     parser = argparse.ArgumentParser(description="Extract game.pak contents")
@@ -173,7 +182,7 @@ def main():
         if args.dump_index:
             payload = {
                 "header": meta,
-                "entries": [{**e, "path": str(e["path"])} for e in entries],
+                "entries": serialize_entries(entries),
             }
             args.dump_index.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"索引已导出: {args.dump_index}")
@@ -182,7 +191,7 @@ def main():
     if args.dump_index:
         payload = {
             "header": meta,
-            "entries": [{**e, "path": str(e["path"])} for e in entries],
+            "entries": serialize_entries(entries),
         }
         args.dump_index.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"索引已导出: {args.dump_index}")

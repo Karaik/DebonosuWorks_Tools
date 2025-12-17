@@ -2,15 +2,14 @@
 """
 repack.py
 
-Debonosu Works 引擎通用重打包工具。
+Debonosu Works 引擎通用打包工具。
 功能：
 1. 读取 index.json 和源文件目录。
-2. 对每个文件进行 Zlib 压缩。
-3. 重新计算偏移量，重建加密/压缩的索引表。
+2. 对每个文件进行 Zlib 压缩（raw deflate）。
+3. 重新计算偏移量，重建索引。
 4. 生成新的 .pak 文件。
 
-注意：此脚本生成的 PAK 在逻辑上是有效的，但由于 Zlib 压缩率差异，
-可能无法与原始 PAK 做到“字节级”完全一致，但不影响游戏运行。
+注意：改动过的文件重压缩后字节流会不同，包大小与原始可能不一致，但结构正确可正常加载。
 """
 
 import argparse
@@ -28,12 +27,20 @@ class PakBuilder:
         self.current_offset = 0
 
     def add_dir(self, meta: dict):
+        time_bytes = b"\x00" * 24
+        if isinstance(meta.get("time_hex"), str):
+            try:
+                time_bytes = bytes.fromhex(meta["time_hex"])
+            except ValueError:
+                time_bytes = b"\x00" * 24
+
         self.index_entries.append(
             {
                 "type": "dir",
                 "name": pathlib.Path(meta["path"]).name,
                 "child_count": meta.get("child_count", 0),
                 "attributes": meta.get("attributes", 0x10),
+                "time_bytes": time_bytes,
             }
         )
 
@@ -44,6 +51,15 @@ class PakBuilder:
 
         raw_data = path.read_bytes()
         uncompressed_size = len(raw_data)
+
+        # time 字段
+        if isinstance(meta.get("time_hex"), str):
+            try:
+                time_bytes = bytes.fromhex(meta["time_hex"])
+            except ValueError:
+                time_bytes = b"\x00" * 24
+        else:
+            time_bytes = b"\x00" * 24
 
         # 使用 raw deflate (wbits=-15)
         compressed_data = zlib.compress(raw_data, level=9, wbits=-15)
@@ -56,6 +72,7 @@ class PakBuilder:
             "offset": self.current_offset,
             "compressed_size": compressed_size,
             "uncompressed_size": uncompressed_size,
+            "time_bytes": time_bytes,
         }
 
         self.index_entries.append(entry)
@@ -63,21 +80,25 @@ class PakBuilder:
         self.current_offset += compressed_size
 
     def build_index(self) -> bytes:
-        """构建未压缩的二进制索引块（13 个 uint32 头 + 名字，顺序与 index.json 保持一致）。"""
+        """构建未压缩的二进制索引块：offset(int64)、usize(int64)、csize(int64)、flags(uint32)、time(24字节)、name\\0"""
         index_buffer = bytearray()
 
         for entry in self.index_entries:
-            fields = [0] * 13  # 13 x uint32
-            if entry["type"] == "dir":
-                fields[2] = entry["child_count"]
-                fields[6] = entry["attributes"]
-            else:
-                fields[0] = entry["offset"]
-                fields[2] = entry["uncompressed_size"]
-                fields[4] = entry["compressed_size"]
-                fields[6] = entry["attributes"]
+            time_bytes = entry.get("time_bytes") or b"\x00" * 24
+            time_bytes = time_bytes.ljust(24, b"\x00")[:24]
 
-            index_buffer.extend(struct.pack("<13I", *fields))
+            if entry["type"] == "dir":
+                offset = 0
+                usize = entry["child_count"]
+                csize = 0
+                flags = entry["attributes"]
+            else:
+                offset = entry["offset"]
+                usize = entry["uncompressed_size"]
+                csize = entry["compressed_size"]
+                flags = entry["attributes"]
+
+            index_buffer.extend(struct.pack("<QQQI24s", offset, usize, csize, flags, time_bytes))
 
             try:
                 name_bytes = entry["name"].encode("cp932")
@@ -106,7 +127,7 @@ class PakBuilder:
             '<4s I I I',
             b'PAK\x00',
             header_offset,
-            0x00060010,  # 版本号，保留默认
+            0x00060010,  # 版本，保留默认
             0
         )
 
