@@ -5,19 +5,46 @@ Tools to list, extract, repack, and decompile the `*.pak` format, tested on `神
 - Python 3.8+ (standard library only)
 - Java (for script decompiling via `unluac.jar`)
 
+### Optional: 32-bit virtualenv for lua5.1.dll
+Create once (PowerShell):
+```powershell
+py -3.13-32 -m venv .venv32
+```
+Use it by calling the venv python directly (no activation needed):
+```powershell
+.\.venv32\Scripts\python.exe - <<'PY'
+import struct
+print("bits", struct.calcsize('P')*8)
+PY
+```
+For all commands below, replace `python` with `.\.venv32\Scripts\python.exe` to ensure 32-bit.
+
 ## Usage
 - Extract everything and dump index (index.json is required for repack):
   ```bash
-  python depress.py game.pak -o extracted --dump-index index.json
+  .\.venv32\Scripts\python.exe depress.py game.pak -o extracted --dump-index index.json
   ```
 - Decompile scripts with Shift-JIS decoding:
   ```bash
-  python script/decompiler.py --decode --encoding shift_jis --jar script/unluac.jar extracted/script decompiled
+  .\.venv32\Scripts\python.exe script/decompiler.py --jar script/unluac.jar extracted/script decompiled
   ```
 - Repack (not byte-identical):
   ```bash
-  python compress.py index.json extracted -o game_new.pak
+  .\.venv32\Scripts\python.exe compress.py index.json extracted -o game_new.pak
   ```
+- Compile Lua 5.1 source to bytecode (uses `script/lua5.1.dll`, must run under 32-bit Python):
+  - Single file:
+    ```bash
+    .\.venv32\Scripts\python.exe script/compiler.py decompiled\example.lua -o recompiled\example.scb --encoding shift_jis
+    ```
+  - Whole folder (recursively compile all .lua, preserving structure; outputs .scb alongside by default; use -o to set output dir):
+    ```bash
+    .\.venv32\Scripts\python.exe script/compiler.py decompiled --encoding shift_jis
+    ```
+    指定输出目录示例：
+    ```bash
+    .\.venv32\Scripts\python.exe script/compiler.py decompiled -o recompile --encoding shift_jis
+    ```
 
 ## Notes
 - Index block is raw DEFLATE; each entry is a 52-byte header plus a null-terminated Shift-JIS name. Directories have attribute `0x10` and store child count in field 2.

@@ -75,18 +75,22 @@ def main():
                                 buf.append(int(digits))
                                 i = j
                                 continue
-                            # 常见转义
+                            # 保留常见转义为字面形式，避免把 \n 变成真换行导致字符串破坏
                             nxt = src_text[i + 1]
                             if nxt == "n":
-                                buf.append(0x0A)
+                                buf.extend(b"\\n")
                                 i += 2
                                 continue
                             if nxt == "r":
-                                buf.append(0x0D)
+                                buf.extend(b"\\r")
                                 i += 2
                                 continue
                             if nxt == "t":
-                                buf.append(0x09)
+                                buf.extend(b"\\t")
+                                i += 2
+                                continue
+                            if nxt == "\\":
+                                buf.extend(b"\\\\")
                                 i += 2
                                 continue
                         # 其他字符按原样写入单字节
