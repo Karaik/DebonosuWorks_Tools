@@ -23,3 +23,6 @@ Tools to list, extract, repack, and decompile the `*.pak` format, tested on `神
 - Index block is raw DEFLATE; each entry is a 52-byte header plus a null-terminated Shift-JIS name. Directories have attribute `0x10` and store child count in field 2.
 - `script/unluac.jar` is required for decompiling; you can override path via `--jar`.
 - The provided `compress.py` rebuilds a valid PAK but compression ratios differ from the original, so output bytes will not be identical. Use it to repack after edits; if you need byte-perfect matching, an exact-mode repacker is not included here.
+
+## Tools
+- [unluac](https://github.com/scratchminer/unluac/releases/tag/v2023.03.22) (lua5.1 decompiler jar tool)
